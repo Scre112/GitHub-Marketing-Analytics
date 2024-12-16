@@ -1,0 +1,313 @@
+---
+title: "Control 5"
+output: html_document
+date: "2024-11-29"
+---
+
+```{r}
+# Cargar librerías
+library(tidyverse)     # Para manipulación de datos y visualización
+library(plotly)        # Para gráficos interactivos
+library(scales)        # Para formateo de escalas
+library(lubridate)     # Para manejo de fechas
+library(corrplot)      # Para matrices de correlación
+library(gridExtra)     # Para combinar gráficos
+library(hrbrthemes)    # Para temas de visualización
+library(stats)         # Para análisis estadístico
+library(dplyr)
+library(ggplot2)
+library(caret)
+library(randomForest)
+```
+```{r}
+# Cargar datos
+datos <- read.csv("enhanced_saas_marketing_data.csv")
+
+# Preparación inicial de datos
+datos_prep <- datos %>%
+  # Convertir fecha a formato Date
+  mutate(
+    date = as.Date(date),
+    month = floor_date(date, "month"),
+    # Crear métricas derivadas
+    gross_margin = (revenue - costs) / revenue,
+    marketing_efficiency = revenue / marketing_spend,
+    clv_cac_ratio = customer_lifetime_value / customer_acquisition_cost
+  )
+
+# Verificar estructura de datos
+str(datos_prep)
+summary(datos_prep)
+
+```
+```{r}
+# Función para crear gráfico de tendencias
+crear_tendencias <- function(datos, metrica, titulo) {
+  grafico <- datos %>%
+    group_by(date, company) %>%
+    summarise(valor = mean(!!sym(metrica))) %>%
+    ggplot(aes(x = date, y = valor, color = company)) +
+    geom_line(size = 1) +
+    geom_point(size = 2) +
+    theme_ipsum() +
+    labs(
+      title = titulo,
+      x = "Fecha",
+      y = metrica
+    ) +
+    theme(legend.position = "bottom")
+
+  return(ggplotly(grafico))
+}
+
+# Crear gráficos de tendencias
+tendencias_revenue <- crear_tendencias(datos_prep, "revenue",
+                                     "Tendencia de Ingresos por Empresa")
+tendencias_cac <- crear_tendencias(datos_prep, "customer_acquisition_cost",
+                                  "Evolución del CAC")
+tendencias_revenue
+
+```
+```{r}
+tendencias_revenue
+
+```
+# ¿Hay patrones estacionales? No se pueden apreciar patrones estacionales, no se ven patrones que se repiten en un periodo de tiempo.
+# ¿Qué empresa muestra mejor crecimiento? No hay empresa que muestre un claro crecimiento y consatnte. Pero se pueden apreciar picos de las dintintas empresas como la gran caida a finales de 2023 en la empresa 2.
+# ¿Existen puntos de inflexión importantes? si existen se puede apreciar una caida drastica a finales de año en la SaasCompany2, en la empresa Saascompany4 se pueden apreciar dos picos drasticos cerca del 2022-07 y 2023-01, Saascompany3 se pueden apreciar picos cerca del 2022-1 y por ultimo Saascompany1 se ve una caida el 2024-01.
+
+
+```{r}
+tendencias_cac
+```
+
+```{r}
+# Función para análisis de distribución
+analizar_distribucion <- function(datos, variable) {
+  # Histograma
+  hist <- ggplot(datos, aes(x = !!sym(variable), fill = company)) +
+    geom_histogram(alpha = 0.6, bins = 30) +
+    facet_wrap(~company, scales = "free") +
+    theme_minimal() +
+    labs(title = paste("Distribución de", variable))
+
+  # Box plot
+  box <- ggplot(datos, aes(x = company, y = !!sym(variable), fill = company)) +
+    geom_boxplot() +
+    theme_minimal() +
+    labs(title = paste("Box Plot de", variable)) +
+    theme(axis.text.x = element_text(angle = 45))
+
+  # Combinar gráficos
+  grid.arrange(hist, box, ncol = 1)
+}
+
+# Analizar distribuciones de métricas clave
+analizar_distribucion(datos_prep, "revenue")
+analizar_distribucion(datos_prep, "customer_lifetime_value")
+
+```
+#¿Las métricas siguen una distribución normal? No siguen una distribucion normal, los histogramas de las empresas no muestras una simetría caracteristica de una distribucion normal.
+
+# ¿Hay valores atípicos significativos? Se pueden apreciar datos atipicos que esten fuera del box, ya sea ingresos menores o mayores en el caso de la distribucion de revenue y en el grafico de customer_lifetime_value ocurre lo mismo. Pueden ser significativos ya que mustran los ingresos generados y el timepo de vida de los customer, con esa informacion podemos hacernos varias preguntas para poder mejorar el rendimiento de la empresa.
+
+# ¿Qué empresa muestra mayor variabilidad? las empresas con mayor variabilidad son SaasCompany3 y SaasCompany2 ya que tienen mayor rango iterncuartil.
+
+
+
+
+```{r}
+# Función para análisis estadístico por empresa
+analisis_estadistico <- function(datos) {
+  resumen <- datos %>%
+    group_by(company) %>%
+    summarise(
+      # Métricas financieras
+      revenue_mean = mean(revenue),
+      revenue_sd = sd(revenue),
+      margin_mean = mean(gross_margin),
+
+      # Métricas de cliente
+      cac_mean = mean(customer_acquisition_cost),
+      clv_mean = mean(customer_lifetime_value),
+      clv_cac_ratio = mean(clv_cac_ratio),
+
+      # Métricas de engagement
+      satisfaction_mean = mean(customer_satisfaction),
+      churn_rate_mean = mean(churn_rate),
+
+      # Tests estadísticos
+      revenue_normality = shapiro.test(revenue)$p.value
+    )
+
+  return(resumen)
+}
+
+# Ejecutar análisis estadístico
+resumen_estadistico <- analisis_estadistico(datos_prep)
+print(resumen_estadistico)
+```
+
+```{r}
+# Función para análisis de correlaciones
+analizar_correlaciones <- function(datos) {
+  # Seleccionar métricas numéricas
+  metricas_numericas <- datos %>%
+    select_if(is.numeric)  # Excluir variables temporales
+
+  # Calcular correlaciones
+  correlaciones <- cor(metricas_numericas, use = "complete.obs")
+
+  # Crear visualización
+  corrplot(correlaciones,
+          method = "color",
+          type = "upper",
+          addCoef.col = "black",
+          number.cex = 0.25,
+          tl.cex = 0.4
+          )
+}
+
+# Visualizar correlaciones
+analizar_correlaciones(datos_prep)
+```
+¿Qué métricas están más fuertemente correlacionadas?
+Podemos ver fuertes correaciones Entre las variables de traffic y la conversion_rate con 0,75, tambien una fuerte correlacion entre el revenue y el gross_margin con 0,69 y el revenue con marketing_roi y marketing_efficiency con una correlacion del 0,66, tenemos una fuerte correlacion entre closed_deals y conversion_to_paid con un 0,76 y por ultimo tenemos una correlacion fuerte entre customer_lifetime_value con clv_cac_ratio con 0,65.
+
+¿Hay correlaciones negativas importantes?
+Si hay, podemos ver marketing_spend con marketing roi y marketing_efficiency con una correlacion negativa de -0,71, tambien podemos ver customer_acquisition_cost tiene una correlacion negativa de -0,78 con clv_cac_ratio, por ultimo vemos una correlacion negativa entre cost y gross_margin.
+
+¿Qué insights podemos obtener de las relaciones entre variables?
+insights con las correlaciones positivas
+Entre traffic y conversion_rate con esto podemos decir que mientras mayor sea el trafico, lo mas probable es que sea mayor la conversion, por lo que es importante seguir atrayendo trafico ya que puede traer mejores conversiones.
+Entre revenue y gross_margin hay que tener el foco de maximizar ingresos sin comprometer los costos para lograr incrementar los margenes.
+Entre revenue, marketing_roi y marketing_efficiency nos ayuda a ver que las campañas generean un ROI elevado y vuelve a invertir en campañas para poder maximizar resultados.
+Entre customer_lifetime_value y clv_cac_ratio fomenta estrategias para retener clientes, ya que aumentan su valor de vida y mejoran la rentabilidad.
+insights con las correlaciones negativas
+Entre marketing_spend, marketing_roi y marketing_efficiency optimiza el gasto en marketing para centrarse en canales con mayor retorno y reduce inversiones en canales menos efectivos.
+Entre customer_acquisition_cost y clv_cac_ratio reducir el CAC mediante estrategias como automatización, optimización de campañas y enfoque en audiencias específicas.
+Entre cost y gross_margin la reducción de costos operativos y optimiza procesos para mantener márgenes saludables.
+
+
+
+
+```{r}
+# Función para análisis de ROI
+analisis_roi <- function(datos) {
+  roi_plot <- datos %>%
+    group_by(company, month) %>%
+    summarise(
+      marketing_roi = mean(marketing_roi),
+      marketing_spend = mean(marketing_spend)
+    ) %>%
+    ggplot(aes(x = marketing_spend, y = marketing_roi, color = company)) +
+    geom_point(size = 3, alpha = 0.6) +
+    geom_smooth(method = "lm", se = FALSE) +
+    theme_minimal() +
+    labs(
+      title = "ROI vs Inversión en Marketing",
+      x = "Inversión en Marketing",
+      y = "ROI"
+    )
+
+  return(ggplotly(roi_plot))
+}
+
+# Visualizar análisis de ROI
+grafico_roi <- analisis_roi(datos_prep)
+print(grafico_roi)
+```
+¿Qué empresa muestra mejor ROI?
+SaasCompany2 (puntos verdes) parece tener un ROI más alto en general, ya que varios de sus puntos están por encima de los de otras empresas, aunque hay variabilidad. Esto podría indicar que, a ciertos niveles de inversión, tiene un mejor rendimiento relativo.
+
+¿Hay una relación clara entre inversión y retorno?
+Sí, parece haber una relación negativa entre inversión y ROI para todas las empresas, lo que está respaldado por las líneas de tendencia descendentes. Esto sugiere que, a medida que aumenta la inversión en marketing, el ROI disminuye, posiblemente debido a rendimientos decrecientes.
+
+¿Cuál es el punto óptimo de inversión?
+El gráfico no muestra explícitamente un punto óptimo. Sin embargo, visualmente, parece que mantener la inversión en un rango a 18,000–20,000 puede ofrecer un balance entre costos e ingresos.
+
+
+```{r}
+# Realizar análisis de segmentación por región
+# Agrupar por región y calcular métricas clave (ajustar métricas según tus necesidades)
+summary_by_region <- datos_prep %>%
+  group_by(region) %>%
+  summarise(
+    Total_Revenue = sum(revenue, na.rm = TRUE),
+    Avg_Revenue = mean(revenue, na.rm = TRUE),
+    Count = n()
+  )
+
+# Ver resultados del análisis
+print(summary_by_region)
+
+# Crear una visualización: ingresos totales por región
+ggplot(summary_by_region, aes(x = reorder(region, -Total_Revenue), y = Total_Revenue, fill = region)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Ingresos Totales por Región", x = "Región", y = "Ingresos Totales") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set3")
+
+# Crear otra visualización: ingresos promedio por región
+ggplot(summary_by_region, aes(x = reorder(region, -Avg_Revenue), y = Avg_Revenue, fill = region)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Ingresos Promedio por Región", x = "Región", y = "Ingresos Promedio") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set3")
+```
+
+```{r}
+# Desarrollo de un modelo predictivo simple para "revenue"
+# Preparar datos: convertir "region" en factor si no lo es
+if (!is.factor(datos_prep$region)) {
+  datos_prep$region <- as.factor(datos_prep$region)
+}
+
+# Dividir datos en entrenamiento y prueba
+set.seed(123) # Para reproducibilidad
+train_index <- createDataPartition(datos_prep$revenue, p = 0.8, list = FALSE)
+train_data <- datos_prep[train_index, ]
+test_data <- datos_prep[-train_index, ]
+
+# Entrenar un modelo de bosque aleatorio
+modelo_rf <- randomForest(revenue ~ ., data = train_data, importance = TRUE)
+
+# Evaluar el modelo
+predicciones <- predict(modelo_rf, newdata = test_data)
+metrica_rmse <- sqrt(mean((test_data$revenue - predicciones)^2))
+cat("RMSE del modelo: ", metrica_rmse, "\n")
+
+# Importancia de las variables
+importancia <- importance(modelo_rf)
+varImpPlot(modelo_rf, n.var = 10, main = "Importancia de las Variables", cex.names = 0.7)
+
+
+# Resultados finales
+print("Importancia de las variables:")
+print(importancia)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
